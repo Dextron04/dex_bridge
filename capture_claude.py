@@ -4,6 +4,7 @@ import os
 import json
 import time
 import gzip
+import subprocess
 from mitmproxy import http, ctx
 
 HOST_RE = re.compile(r"(?:^|\.)claude\.ai$", re.IGNORECASE)
@@ -324,6 +325,18 @@ class ClaudeStreamParserAddon:
             with open(fname, "w", encoding="utf-8") as f:
                 json.dump(result, f, indent=2, ensure_ascii=False)
             ctx.log.info(f"[CLAUDE PARSER] wrote parsed JSON -> {fname}")
+            
+            # Auto-run merge script
+            try:
+                ctx.log.info("[CLAUDE PARSER] running merge script...")
+                subprocess.Popen(
+                    ["python", "merge_conversations.py"],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL
+                )
+            except Exception as e:
+                ctx.log.warn(f"[CLAUDE PARSER] failed to run merge script: {e}")
+                
         except Exception as e:
             ctx.log.warn(f"[CLAUDE PARSER] failed to write {fname}: {e}")
 

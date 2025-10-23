@@ -3,6 +3,7 @@ import re
 import os
 import json
 import time
+import subprocess
 from mitmproxy import http, ctx
 
 HOST_RE = re.compile(r"(?:^|\.)chatgpt\.com$", re.IGNORECASE)
@@ -252,6 +253,18 @@ class StreamParserAddon:
             with open(fname, "w", encoding="utf-8") as f:
                 json.dump(result, f, indent=2, ensure_ascii=False)
             ctx.log.info(f"[PARSER] wrote parsed JSON -> {fname}")
+            
+            # Auto-run merge script
+            try:
+                ctx.log.info("[PARSER] running merge script...")
+                subprocess.Popen(
+                    ["python", "merge_conversations.py"],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL
+                )
+            except Exception as e:
+                ctx.log.warn(f"[PARSER] failed to run merge script: {e}")
+                
         except Exception as e:
             ctx.log.warn(f"[PARSER] failed to write {fname}: {e}")
 
