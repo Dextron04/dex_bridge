@@ -135,6 +135,28 @@ def parse_ndjson_like(text):
 
 
 class StreamParserAddon:
+    def __init__(self):
+        self.response_buffers = {}
+    
+    def responseheaders(self, flow: http.HTTPFlow) -> None:
+        """
+        Called when response headers are received, before the body.
+        Disable streaming for responses we want to capture.
+        """
+        try:
+            host = getattr(flow.request, "host", None) or getattr(flow.request, "pretty_host", "")
+            path = getattr(flow.request, "path", None)
+            if path is None:
+                url = getattr(flow.request, "pretty_url", "")
+                path = re.sub(r"^https?://[^/]+", "", url)
+        except Exception:
+            return
+
+        if HOST_RE.search(host) and PATH_RE.search(path):
+            # Disable streaming for this response so we can capture the full content
+            flow.response.stream = False
+            ctx.log.info(f"[PARSER] disabled streaming for {host}{path}")
+    
     def response(self, flow: http.HTTPFlow) -> None:
         # Only operate on matching host/path
         try:
@@ -195,21 +217,37 @@ class StreamParserAddon:
 
         reconstructed_text = "".join(pieces).strip()
 
+        # Extract conversation_id from events
+        conversation_id = None
+        for e in parsed_events:
+            if isinstance(e, dict) and "conversation_id" in e:
+                conversation_id = e["conversation_id"]
+                break
+
         # Build final JSON structure
         result = {
             "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S"),
             "request_url": flow.request.url,
             "host": host,
             "path": path,
+            "conversation_id": conversation_id,
             "reconstructed_text": reconstructed_text,
             "events_count": len(events),
-            "parsed_events_preview": parsed_events[:50],  # keep preview length reasonable
+            "parsed_events_preview": parsed_events,  # save all events, not just preview
         }
 
-        # write pretty JSON
-        ts = time.strftime("%Y%m%dT%H%M%S")
+        # Create provider-specific subdirectory
         safe_host = re.sub(r"[^\w\-\_\.]", "_", host)
-        fname = os.path.join(OUT_DIR, f"{ts}__{safe_host}__conversation_parsed.json")
+        provider_dir = os.path.join(OUT_DIR, safe_host)
+        os.makedirs(provider_dir, exist_ok=True)
+
+        # write pretty JSON using conversation_id and timestamp
+        ts = time.strftime("%Y%m%dT%H%M%S")
+        if conversation_id:
+            fname = os.path.join(provider_dir, f"{conversation_id}__{ts}__conversation_parsed.json")
+        else:
+            fname = os.path.join(provider_dir, f"{ts}__conversation_parsed.json")
+        
         try:
             with open(fname, "w", encoding="utf-8") as f:
                 json.dump(result, f, indent=2, ensure_ascii=False)

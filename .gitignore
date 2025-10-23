@@ -1,3 +1,4 @@
 parsed_matches/
 __pycache__/
 *.mitm
+merged_conversations/
