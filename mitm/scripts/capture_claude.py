@@ -329,24 +329,50 @@ class ClaudeStreamParserAddon:
             # Auto-run merge script
             try:
                 ctx.log.info("[CLAUDE PARSER] running merge script...")
+                # Get the project root directory (two levels up from mitm/scripts/)
+                script_dir = os.path.dirname(os.path.abspath(__file__))
+                project_root = os.path.dirname(os.path.dirname(script_dir))
                 subprocess.Popen(
                     ["python", "merge_conversations.py"],
-                    stdout=subprocess.DEVNULL,
-                    stderr=subprocess.DEVNULL
+                    cwd=project_root,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE
                 )
             except Exception as e:
                 ctx.log.warn(f"[CLAUDE PARSER] failed to run merge script: {e}")
 
-                            # Auto-run store script
+            # Auto-run store script
             try:
-                ctx.log.info("[PARSER] running store script...")
-                subprocess.Popen(
+                ctx.log.info("[CLAUDE PARSER] running store script...")
+                # Get the project root directory (two levels up from mitm/scripts/)
+                script_dir = os.path.dirname(os.path.abspath(__file__))
+                project_root = os.path.dirname(os.path.dirname(script_dir))
+                process = subprocess.Popen(
                     ["python", "store_chat_message.py"],
-                    stdout=subprocess.DEVNULL,
-                    stderr=subprocess.DEVNULL
+                    cwd=project_root,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    text=True
                 )
+                
+                # Wait a bit and check if the process is still running or completed
+                try:
+                    stdout, stderr = process.communicate(timeout=30)
+                    if process.returncode == 0:
+                        ctx.log.info("[CLAUDE PARSER] ✓ Store script completed successfully")
+                        # Log relevant output lines
+                        for line in stdout.splitlines():
+                            if "Inserted" in line or "Skipping" in line or "✓" in line or "⊘" in line:
+                                ctx.log.info(f"[CLAUDE PARSER]   {line}")
+                    else:
+                        ctx.log.warn(f"[CLAUDE PARSER] ✗ Store script failed with exit code {process.returncode}")
+                        if stderr:
+                            ctx.log.warn(f"[CLAUDE PARSER] Error: {stderr[:500]}")
+                except subprocess.TimeoutExpired:
+                    ctx.log.warn("[CLAUDE PARSER] Store script timeout (>30s), running in background")
+                    process.kill()
             except Exception as e:
-                ctx.log.warn(f"[PARSER] failed to run store script: {e}")
+                ctx.log.warn(f"[CLAUDE PARSER] failed to run store script: {e}")
                 
         except Exception as e:
             ctx.log.warn(f"[CLAUDE PARSER] failed to write {fname}: {e}")
