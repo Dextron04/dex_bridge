@@ -336,6 +336,17 @@ class ClaudeStreamParserAddon:
                 )
             except Exception as e:
                 ctx.log.warn(f"[CLAUDE PARSER] failed to run merge script: {e}")
+
+                            # Auto-run store script
+            try:
+                ctx.log.info("[PARSER] running store script...")
+                subprocess.Popen(
+                    ["python", "store_chat_message.py"],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL
+                )
+            except Exception as e:
+                ctx.log.warn(f"[PARSER] failed to run store script: {e}")
                 
         except Exception as e:
             ctx.log.warn(f"[CLAUDE PARSER] failed to write {fname}: {e}")
