@@ -1,0 +1,12 @@
+{
+	"servers": {
+		"memory_mcp": {
+			"type": "stdio",
+			"command": "/Users/tushinkulshreshtha/ChatGPT_req_capture/dexenv/bin/python3",
+			"args": [
+				"/Users/tushinkulshreshtha/ChatGPT_req_capture/memory_mcp/access_llm_memory.py"
+			]
+		}
+	},
+	"inputs": []
+}
