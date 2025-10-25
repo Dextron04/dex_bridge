@@ -6,6 +6,7 @@ import uuid
 import hashlib
 import ssl
 import httpx
+import time
 from qdrant_client import QdrantClient
 from qdrant_client.models import VectorParams, Distance, Filter, FieldCondition, MatchValue
 from openai import OpenAI
@@ -14,13 +15,16 @@ from openai import OpenAI
 dotenv.load_dotenv()
 qdrant = QdrantClient(host="localhost", port=6333)
 
-# Create custom httpx client that doesn't verify SSL (for proxy environments)
-# This is needed when running through mitmproxy or in environments with SSL certificate issues
-http_client = httpx.Client(verify=False)
+# Create custom httpx client with timeout and no SSL verification
+http_client = httpx.Client(
+    verify=False,
+    timeout=60.0  # 60 second timeout
+)
 
 client = OpenAI(
     api_key=os.getenv("OPENAI_API_KEY"),
-    http_client=http_client
+    http_client=http_client,
+    max_retries=3  # Retry up to 3 times
 )
 
 collection_name = "chat_messages"
@@ -41,12 +45,25 @@ conversation_files = glob.glob(os.path.join(MERGED_DIR, "*__conversation_merged.
 
 print(f"Found {len(conversation_files)} ChatGPT conversations\n")
 
-def get_embedding(text):
-    response = client.embeddings.create(
-        input=text,
-        model="text-embedding-3-small"
-    )
-    return response.data[0].embedding
+def get_embedding(text, max_retries=3):
+    """Get embedding with retry logic for timeout errors."""
+    for attempt in range(max_retries):
+        try:
+            response = client.embeddings.create(
+                input=text,
+                model="text-embedding-3-small"
+            )
+            return response.data[0].embedding
+        except Exception as e:
+            error_msg = str(e)
+            if attempt < max_retries - 1:
+                wait_time = (attempt + 1) * 2  # Exponential backoff: 2s, 4s, 6s
+                print(f"  ⚠️  API error (attempt {attempt + 1}/{max_retries}): {error_msg[:80]}...")
+                print(f"     Retrying in {wait_time} seconds...")
+                time.sleep(wait_time)
+            else:
+                print(f"  ❌ Failed after {max_retries} attempts: {error_msg[:100]}")
+                raise
 
 def generate_content_hash(text):
     """Generate SHA256 hash of text content for deduplication."""
@@ -73,98 +90,110 @@ def check_if_exists(content_hash):
 
 # Load each conversation
 for filepath in conversation_files:
-    with open(filepath, 'r', encoding='utf-8') as f:
-        conversation = json.load(f)
-    
-    conversation_id = conversation['conversation_id']
-    provider = conversation.get('provider', 'chatgpt.com')
-
-    points = []
-    skipped_count = 0
-    inserted_count = 0
-    
-    print(f"Loading ChatGPT conversation: {conversation_id}")
-    
-    # You can access:
-    # - conversation_id: The unique conversation ID
-    # - conversation['exchanges']: List of all exchanges
-    # - Each exchange has: user_input, assistant_response, timestamp, model, etc.
-
-    for idx, exch in enumerate(conversation["exchanges"], start=1):
-        user_input = exch["user_input"].strip()
-        user_content_hash = generate_content_hash(user_input)
+    try:
+        with open(filepath, 'r', encoding='utf-8') as f:
+            conversation = json.load(f)
         
-        # Check if user message already exists
-        if check_if_exists(user_content_hash):
-            print(f"  Skipping exchange {idx}: User message already exists (hash: {user_content_hash[:16]}...)")
-            skipped_count += 1
+        conversation_id = conversation['conversation_id']
+        provider = conversation.get('provider', 'chatgpt.com')
+
+        points = []
+        skipped_count = 0
+        inserted_count = 0
+        
+        print(f"Loading ChatGPT conversation: {conversation_id}")
+        
+        # You can access:
+        # - conversation_id: The unique conversation ID
+        # - conversation['exchanges']: List of all exchanges
+        # - Each exchange has: user_input, assistant_response, timestamp, model, etc.
+
+        for idx, exch in enumerate(conversation["exchanges"], start=1):
+            try:
+                user_input = exch["user_input"].strip()
+                user_content_hash = generate_content_hash(user_input)
+                
+                # Check if user message already exists
+                if check_if_exists(user_content_hash):
+                    print(f"  Skipping exchange {idx}: User message already exists (hash: {user_content_hash[:16]}...)")
+                    skipped_count += 1
+                else:
+                    user_vector = get_embedding(user_input)
+                    
+                    # Generate UUID for Qdrant point ID
+                    user_point_id = str(uuid.uuid5(uuid.NAMESPACE_DNS, f"{conversation_id}__user__{exch['user_message_id']}"))
+                    print(f"  Processing exchange {idx}: User message ID {exch['user_message_id']}, Point ID {user_point_id}")
+
+                    
+                    points.append({
+                        "id": user_point_id,
+                        "vector": user_vector,
+                        "payload": {
+                            "conversation_id": conversation_id,
+                            "role": "user",
+                            "text": user_input,
+                            "timestamp": exch["timestamp"],
+                            "message_id": exch["user_message_id"],
+                            "model": exch.get("model", ""),
+                            "exchange_index": idx,
+                            "provider": provider,
+                            "content_hash": user_content_hash,
+                        }
+                    })
+                    inserted_count += 1
+
+                if exch.get("assistant_response"):
+                    assistant_response = exch["assistant_response"].strip()
+                    assistant_content_hash = generate_content_hash(assistant_response)
+                    
+                    # Check if assistant message already exists
+                    if check_if_exists(assistant_content_hash):
+                        print(f"  Skipping exchange {idx}: Assistant message already exists (hash: {assistant_content_hash[:16]}...)")
+                        skipped_count += 1
+                    else:
+                        assistant_vector = get_embedding(assistant_response)
+                        
+                        # Generate UUID for Qdrant point ID
+                        assistant_msg_id = exch['assistant_message_id'] or exch['user_message_id']
+                        assistant_point_id = str(uuid.uuid5(uuid.NAMESPACE_DNS, f"{conversation_id}__assistant__{assistant_msg_id}"))
+                        
+                        points.append({
+                            "id": assistant_point_id,
+                            "vector": assistant_vector,
+                            "payload": {
+                                "conversation_id": conversation_id,
+                                "role": "assistant",
+                                "text": assistant_response,
+                                "timestamp": exch["timestamp"],
+                                "message_id": exch["assistant_message_id"],
+                                "model": exch.get("model", ""),
+                                "exchange_index": idx,
+                                "provider": provider,
+                                "content_hash": assistant_content_hash,
+                            }
+                        })
+                        inserted_count += 1
+            
+            except Exception as e:
+                print(f"  ❌ Error processing exchange {idx}: {str(e)[:150]}")
+                print(f"     Continuing with next exchange...")
+                continue
+
+        if points:
+            qdrant.upsert(
+                collection_name=collection_name,
+                points=points
+            )
+            print(f"✓ Inserted {len(points)} messages from conversation {conversation_id}")
         else:
-            user_vector = get_embedding(user_input)
-            
-            # Generate UUID for Qdrant point ID
-            user_point_id = str(uuid.uuid5(uuid.NAMESPACE_DNS, f"{conversation_id}__user__{exch['user_message_id']}"))
-            print(f"  Processing exchange {idx}: User message ID {exch['user_message_id']}, Point ID {user_point_id}")
-
-            
-            points.append({
-                "id": user_point_id,
-                "vector": user_vector,
-                "payload": {
-                    "conversation_id": conversation_id,
-                    "role": "user",
-                    "text": user_input,
-                    "timestamp": exch["timestamp"],
-                    "message_id": exch["user_message_id"],
-                    "model": exch.get("model", ""),
-                    "exchange_index": idx,
-                    "provider": provider,
-                    "content_hash": user_content_hash,
-                }
-            })
-            inserted_count += 1
-
-        if exch.get("assistant_response"):
-            assistant_response = exch["assistant_response"].strip()
-            assistant_content_hash = generate_content_hash(assistant_response)
-            
-            # Check if assistant message already exists
-            if check_if_exists(assistant_content_hash):
-                print(f"  Skipping exchange {idx}: Assistant message already exists (hash: {assistant_content_hash[:16]}...)")
-                skipped_count += 1
-            else:
-                assistant_vector = get_embedding(assistant_response)
-                
-                # Generate UUID for Qdrant point ID
-                assistant_msg_id = exch['assistant_message_id'] or exch['user_message_id']
-                assistant_point_id = str(uuid.uuid5(uuid.NAMESPACE_DNS, f"{conversation_id}__assistant__{assistant_msg_id}"))
-                
-                points.append({
-                    "id": assistant_point_id,
-                    "vector": assistant_vector,
-                    "payload": {
-                        "conversation_id": conversation_id,
-                        "role": "assistant",
-                        "text": assistant_response,
-                        "timestamp": exch["timestamp"],
-                        "message_id": exch["assistant_message_id"],
-                        "model": exch.get("model", ""),
-                        "exchange_index": idx,
-                        "provider": provider,
-                        "content_hash": assistant_content_hash,
-                    }
-                })
-                inserted_count += 1
-
-    if points:
-        qdrant.upsert(
-            collection_name=collection_name,
-            points=points
-        )
-        print(f"✓ Inserted {len(points)} messages from conversation {conversation_id}")
-    else:
-        print(f"⊘ No new messages to insert from conversation {conversation_id}")
+            print(f"⊘ No new messages to insert from conversation {conversation_id}")
+        
+        print(f"  Stats: {inserted_count} inserted, {skipped_count} skipped (duplicates)\n")
     
-    print(f"  Stats: {inserted_count} inserted, {skipped_count} skipped (duplicates)\n")
+    except Exception as e:
+        print(f"❌ Error processing file {os.path.basename(filepath)}: {str(e)[:200]}")
+        print(f"   Continuing with next conversation...\n")
+        continue
 
 
 
