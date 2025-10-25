@@ -4,6 +4,8 @@ import json
 import glob
 import uuid
 import hashlib
+import ssl
+import httpx
 from qdrant_client import QdrantClient
 from qdrant_client.models import VectorParams, Distance, Filter, FieldCondition, MatchValue
 from openai import OpenAI
@@ -11,7 +13,15 @@ from openai import OpenAI
 
 dotenv.load_dotenv()
 qdrant = QdrantClient(host="localhost", port=6333)
-client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+
+# Create custom httpx client that doesn't verify SSL (for proxy environments)
+# This is needed when running through mitmproxy or in environments with SSL certificate issues
+http_client = httpx.Client(verify=False)
+
+client = OpenAI(
+    api_key=os.getenv("OPENAI_API_KEY"),
+    http_client=http_client
+)
 
 collection_name = "chat_messages"
 
