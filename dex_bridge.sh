@@ -41,16 +41,26 @@ _MMMMMMM9'  YMMMM9 _d_  _)MM_       _MMMMMMM9' _MM_    _MM_ YMMMMMM_ YMMMMb. YMM
                                                                      YMMMM9          
 EOF
         echo -e "${NC}"
-        echo -e "${BLUE}$(center_text "Proxy Management Tool" $term_width)${NC}"
+        echo -e "${BLUE}$(center_text "Long term shared context between LLMs" $term_width)${NC}"
     else
         # Simplified banner for narrow terminals
         echo -e "${CYAN}"
-        echo "╔════════════════════════════════════╗"
-        echo "║                                    ║"
-        echo "║         DEX BRIDGE PROXY           ║"
-        echo "║      Management Tool v1.0          ║"
-        echo "║                                    ║"
-        echo "╚════════════════════════════════════╝"
+        echo "╔═══════════════════════════════════════════════╗"
+        echo "║                                               ║"
+        echo "║                  DEX BRIDGE                   ║"
+        echo "║                                               ║"
+        echo "║           []                     []           ║"
+        echo "║         .:[]:                  .:[]:          ║"
+        echo "║       .: :[]: :.             .: :[]: :.       ║"
+        echo "║     .: : :[]: : :.         .: : :[]: : :.     ║"
+        echo "║   .: : : :[]: : : :-.___.-: : : :[]: : : :.   ║"
+        echo "║ _:_:_:_:_:[]:_:_:_:_:_::_:_:_:_ :[]:_:_:_:_:_ ║"
+        echo "║ ^^^^^^^^^^[]^^^^^^^^^^^^^^^^^^^^^[]^^^^^^^^^^ ║"
+        echo "║           []                     []           ║"
+        echo "║                                               ║"
+        echo "║      Long term shared context between LLMs    ║"
+        echo "║                                               ║"
+        echo "╚═══════════════════════════════════════════════╝"
         echo -e "${NC}"
     fi
     echo ""
@@ -171,54 +181,108 @@ show_menu() {
 
 # --- Certificate Management Functions -- #
 
-download_mitm_cert() {
-    local dest_dir="$HOME/.mitmproxy"
-    local cert_url="http://mitm.it/cert/pem"
+generate_mitm_cert() {
+    # Get the actual user when running with sudo
+    local actual_user="${SUDO_USER:-$USER}"
+    local user_home=$(eval echo ~$actual_user)
+    local dest_dir="$user_home/.mitmproxy"
     local dest_file="$dest_dir/mitmproxy-ca-cert.pem"
+    
     if [ ! -d "$dest_dir" ]; then
         mkdir -p "$dest_dir"
+        chown "$actual_user" "$dest_dir" 2>/dev/null || true
     fi
 
     if [[ -s "$dest_file" ]]; then
         echo -e "${GREEN}✓ mitmproxy CA certificate already exists at $dest_file${NC}"
-        return
+        return 0
     fi
 
-    echo -e "${YELLOW}Downloading mitmproxy CA certificate...${NC}"
-
-    if command -v curl >/dev/null 2>&1; then
-        curl -s -o "$dest_file" "$cert_url"
-    elif command -v wget >/dev/null 2>&1; then
-        wget -q -O "$dest_file" "$cert_url"
+    echo -e "${YELLOW}Generating mitmproxy CA certificate...${NC}"
+    
+    # Run mitmdump briefly to generate the certificate as the actual user
+    if command -v mitmdump >/dev/null 2>&1; then
+        # Start mitmdump in background and kill it after 2 seconds
+        if [ "$actual_user" != "root" ] && [ -n "$SUDO_USER" ]; then
+            # Run as the actual user if we're running with sudo
+            sudo -u "$actual_user" mitmdump >/dev/null 2>&1 &
+        else
+            mitmdump >/dev/null 2>&1 &
+        fi
+        local mitm_pid=$!
+        sleep 2
+        kill $mitm_pid 2>/dev/null || true
+        wait $mitm_pid 2>/dev/null || true
     else
-        echo -e "${RED}✗ Neither curl nor wget is installed. Please install one to download the certificate.${NC}"
+        echo -e "${RED}✗ mitmdump is not installed. Cannot generate certificate.${NC}"
         return 1
     fi
 
-    if [[ ! -s "$dest_file" ]]; then
-        echo -e "${RED}✗ Failed to download mitmproxy CA certificate.${NC}"
-        return 2
-    fi
+    # Give it a moment to finish writing
+    sleep 1
 
-    echo "CA certificate downloaded to $dest_file"
-    echo "$dest_file"
-    return 0
+    # Check if certificate was generated
+    if [[ -s "$dest_file" ]]; then
+        echo -e "${GREEN}✓ mitmproxy CA certificate generated at $dest_file${NC}"
+        # Ensure proper ownership
+        chown "$actual_user" "$dest_file" 2>/dev/null || true
+        return 0
+    else
+        echo -e "${RED}✗ Failed to generate mitmproxy CA certificate.${NC}"
+        return 1
+    fi
 }
 
 install_mitm_ca_cert() {
     echo -e "${YELLOW}Installing mitmproxy CA certificate...${NC}"
-    local cert_path="$HOME/.mitmproxy/mitmproxy-ca-cert.pem"
-    if [ -f "$cert_path" ]; then
-        sudo security add-trusted-cert -d -r trustRoot -k /Library/Keychains/System.keychain "$cert_path"
-        echo -e "${GREEN}✓ mitmproxy CA certificate installed successfully${NC}"
-    else
+    local actual_user="${SUDO_USER:-$USER}"
+    local user_home=$(eval echo ~$actual_user)
+    local cert_path="$user_home/.mitmproxy/mitmproxy-ca-cert.pem"
+    
+    if [ ! -f "$cert_path" ]; then
         echo -e "${RED}✗ mitmproxy CA certificate not found at $cert_path${NC}"
+        return 1
     fi
+    
+    # Remove old certificate if it exists (to avoid duplicates)
+    security delete-certificate -c "mitmproxy" /Library/Keychains/System.keychain 2>/dev/null || true
+    
+    # Install certificate to system keychain with SSL-only trust
+    sudo security add-certificates -k /Library/Keychains/System.keychain "$cert_path"
+    
+    if [ $? -eq 0 ]; then
+        # Set trust settings for SSL only
+        sudo security add-trusted-cert -d -p ssl -r trustRoot -k /Library/Keychains/System.keychain "$cert_path" 2>/dev/null
+        echo -e "${GREEN}✓ mitmproxy CA certificate installed to system keychain (SSL/TLS trust only)${NC}"
+        
+        # Also add to user's login keychain for browser compatibility
+        security add-certificates -k ~/Library/Keychains/login.keychain-db "$cert_path" 2>/dev/null && \
+        security add-trusted-cert -d -p ssl -r trustRoot -k ~/Library/Keychains/login.keychain-db "$cert_path" 2>/dev/null || true
+        
+        echo -e "${GREEN}✓ mitmproxy CA certificate installed successfully${NC}"
+        echo -e "${YELLOW}Note: Certificate is trusted for SSL/TLS only. Restart browser for changes to take effect${NC}"
+    else
+        echo -e "${RED}✗ Failed to install mitmproxy CA certificate${NC}"
+        return 1
+    fi
+    
     sleep 1
+    return 0
 }
 
 verify_mitm_cert() {
-    local cert_name="mitmproxy-ca-cert.pem"
+    local actual_user="${SUDO_USER:-$USER}"
+    local user_home=$(eval echo ~$actual_user)
+    local cert_path="$user_home/.mitmproxy/mitmproxy-ca-cert.pem"
+    local cert_name="mitmproxy"
+    
+    # Check if certificate file exists on disk
+    if [ ! -f "$cert_path" ]; then
+        echo -e "${YELLOW}Certificate file not found at $cert_path${NC}"
+        return 1
+    fi
+    
+    # Check if certificate is installed in system keychain
     if security find-certificate -a -c "$cert_name" /Library/Keychains/System.keychain >/dev/null 2>&1; then
         return 0
     else
@@ -236,9 +300,10 @@ main() {
         echo -e "${GREEN}Certificate verification passed.${NC}"
     else
         echo -e "${YELLOW}Certificate not found or not trusted. Installing...${NC}"
-        cert_path=$(download_mitm_cert)
-        if [ $? -eq 0 ]; then
+        if generate_mitm_cert; then
             install_mitm_ca_cert
+        else
+            echo -e "${RED}✗ Failed to generate certificate. Please check your mitmproxy installation.${NC}"
         fi
     fi
     sleep 1

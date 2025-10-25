@@ -24,7 +24,7 @@ openai = OpenAI(
 collection_name = "chat_messages"
 
 @mcp.tool()
-def search_vector_db(query: str, top_k: int = 5) -> list:
+def search_memory(query: str, top_k: int = 5) -> list:
     """
     Search the vector database for similar entries to the query.
     """

@@ -1,0 +1,17 @@
+# MITM Proxy for request interception
+mitmproxy>=10.0.0
+
+# Vector Database
+qdrant-client>=1.7.0
+
+# OpenAI API
+openai>=1.0.0
+
+# HTTP client library
+httpx>=0.25.0
+
+# Environment variable management
+python-dotenv>=1.0.0
+
+# MCP Server framework
+mcp>=0.1.0
