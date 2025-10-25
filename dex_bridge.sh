@@ -169,10 +169,86 @@ show_menu() {
     echo -ne "${BLUE}Select option: ${NC}"
 }
 
+# --- Certificate Management Functions -- #
+
+download_mitm_cert() {
+    local dest_dir="$HOME/.mitmproxy"
+    local cert_url="http://mitm.it/cert/pem"
+    local dest_file="$dest_dir/mitmproxy-ca-cert.pem"
+    if [ ! -d "$dest_dir" ]; then
+        mkdir -p "$dest_dir"
+    fi
+
+    if [[ -s "$dest_file" ]]; then
+        echo -e "${GREEN}✓ mitmproxy CA certificate already exists at $dest_file${NC}"
+        return
+    fi
+
+    echo -e "${YELLOW}Downloading mitmproxy CA certificate...${NC}"
+
+    if command -v curl >/dev/null 2>&1; then
+        curl -s -o "$dest_file" "$cert_url"
+    elif command -v wget >/dev/null 2>&1; then
+        wget -q -O "$dest_file" "$cert_url"
+    else
+        echo -e "${RED}✗ Neither curl nor wget is installed. Please install one to download the certificate.${NC}"
+        return 1
+    fi
+
+    if [[ ! -s "$dest_file" ]]; then
+        echo -e "${RED}✗ Failed to download mitmproxy CA certificate.${NC}"
+        return 2
+    fi
+
+    echo "CA certificate downloaded to $dest_file"
+    echo "$dest_file"
+    return 0
+}
+
+install_mitm_ca_cert() {
+    echo -e "${YELLOW}Installing mitmproxy CA certificate...${NC}"
+    local cert_path="$HOME/.mitmproxy/mitmproxy-ca-cert.pem"
+    if [ -f "$cert_path" ]; then
+        sudo security add-trusted-cert -d -r trustRoot -k /Library/Keychains/System.keychain "$cert_path"
+        echo -e "${GREEN}✓ mitmproxy CA certificate installed successfully${NC}"
+    else
+        echo -e "${RED}✗ mitmproxy CA certificate not found at $cert_path${NC}"
+    fi
+    sleep 1
+}
+
+verify_mitm_cert() {
+    local cert_name="mitmproxy-ca-cert.pem"
+    if security find-certificate -a -c "$cert_name" /Library/Keychains/System.keychain >/dev/null 2>&1; then
+        return 0
+    else
+        return 1
+    fi
+}
+
 # Main interactive loop
 main() {
     # Initialize banner flag
     SHOW_BANNER=true
+
+    echo -e "${YELLOW}Checking mitmproxy CA certificate...${NC}"
+    if verify_mitm_cert; then
+        echo -e "${GREEN}Certificate verification passed.${NC}"
+    else
+        echo -e "${YELLOW}Certificate not found or not trusted. Installing...${NC}"
+        cert_path=$(download_mitm_cert)
+        if [ $? -eq 0 ]; then
+            install_mitm_ca_cert
+        fi
+    fi
+    sleep 1
+
+    if mitmdump --version >/dev/null 2>&1; then
+        echo -e "${GREEN}✓ mitmdump is installed.${NC}"
+    else
+        echo -e "${RED}✗ mitmdump is not installed. Please install mitmproxy to proceed.${NC}"
+        exit 1
+    fi
     
     # Check if running in non-interactive mode (with argument)
     if [ $# -gt 0 ]; then
