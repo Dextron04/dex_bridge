@@ -1,5 +1,30 @@
 #!/usr/bin/env bash
 
+# ============================================================================
+# Dex Bridge - Proxy Management Tool
+# ============================================================================
+# 
+# Copyright (c) 2025 Dextron04
+# 
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+# 
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
+# 
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+# THE SOFTWARE.
+# ============================================================================
+
 SERVICE="Wi-Fi"
 PROXY_IP="127.0.0.1"
 PROXY_PORT=8080
@@ -42,6 +67,7 @@ _MMMMMMM9'  YMMMM9 _d_  _)MM_       _MMMMMMM9' _MM_    _MM_ YMMMMMM_ YMMMMb. YMM
 EOF
         echo -e "${NC}"
         echo -e "${BLUE}$(center_text "Long term shared context between LLMs" $term_width)${NC}"
+        echo -e "${BLUE}$(center_text "Copyright © 2025 Tushin Kulshreshtha" $term_width)${NC}"
     else
         # Simplified banner for narrow terminals
         echo -e "${CYAN}"
@@ -59,6 +85,8 @@ EOF
         echo "║           []                     []           ║"
         echo "║                                               ║"
         echo "║      Long term shared context between LLMs    ║"
+        echo "║                                               ║"
+        echo "║        Copyright © 2025 Tushin Kulshreshtha   ║"
         echo "║                                               ║"
         echo "╚═══════════════════════════════════════════════╝"
         echo -e "${NC}"
