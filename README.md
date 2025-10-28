@@ -1,3 +1,6 @@
+
+<img width="1536" height="1024" alt="ChatGPT Image Oct 27, 2025, 11_21_50 PM" src="https://github.com/user-attachments/assets/cec21a34-d472-4c1f-9609-5e761b5c3e9a" />
+
 # 🌉 Dex Bridge
 
 > **Long-term Shared Context Between LLMs**
